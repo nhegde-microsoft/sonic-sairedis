@@ -453,6 +453,12 @@ typedef enum {
     /* interface-output-arc ethertype -> policer binding */
     extern int vpp_sonic_ext_copp_ifout_bind(uint16_t ethertype,
             const char *policer_name, bool is_bind, bool match_ip4_ttl_expiring);
+    /* Same, plus match_dhcp_broadcast: 0=none (identical to
+     * vpp_sonic_ext_copp_ifout_bind above), 1=DHCP, 2=DHCPv6 -- see
+     * sonic_ext_copp_ifout_entry_t.match_dhcp_broadcast. */
+    extern int vpp_sonic_ext_copp_ifout_bind2(uint16_t ethertype,
+            const char *policer_name, bool is_bind, bool match_ip4_ttl_expiring,
+            uint8_t match_dhcp_broadcast);
     extern int vpp_sonic_ext_copp_ifout_get_counters(uint16_t ethertype,
             uint64_t *conform_packets, uint64_t *exceed_packets, uint64_t *violate_packets);
 

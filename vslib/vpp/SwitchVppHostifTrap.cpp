@@ -81,6 +81,25 @@ namespace
         return trap_type == SAI_HOSTIF_TRAP_TYPE_BGP || trap_type == SAI_HOSTIF_TRAP_TYPE_BGPV6;
     }
 
+    // DHCP/DHCPv6 client-broadcast, routed-port case only (see
+    // sonic-ext-glean-redirect in glean_redirect_node.c). Bridge
+    // members are unaffected -- they take the pre-existing
+    // l2-input-classify path in SwitchVppFdb.cpp regardless of whether
+    // this trap is installed, since that path has no dependency on the
+    // copp-ifout bind table.
+    uint8_t dhcpMatchKind(sai_hostif_trap_type_t trap_type)
+    {
+        if (trap_type == SAI_HOSTIF_TRAP_TYPE_DHCP)
+        {
+            return 1;
+        }
+        if (trap_type == SAI_HOSTIF_TRAP_TYPE_DHCPV6)
+        {
+            return 2;
+        }
+        return 0;
+    }
+
 }
 
 
@@ -138,6 +157,47 @@ void SwitchVpp::installTrapClassifyNow(
         }
 
         return;
+    }
+
+    {
+        uint8_t dhcp_kind = dhcpMatchKind(trap.trap_type);
+
+        if (dhcp_kind != 0)
+        {
+            // Routed-port DHCP/DHCPv6 client-broadcast trap. Bound into
+            // sonic-ext-copp-ifout's entry table (same table
+            // ARP/LACP/LLDP/UDLD/TTL_ERROR use) via the dedicated
+            // match_dhcp_broadcast flag, not by ethertype -- see
+            // sonic_ext_copp_ifout_entry_t.match_dhcp_broadcast. Bridge
+            // members are unaffected: SwitchVppFdb.cpp's pre-existing
+            // l2-input-classify path handles them regardless of whether
+            // this bind exists.
+            auto git = m_trap_group_map.find(trap.trap_group_oid);
+            sai_object_id_t policer_oid = (git != m_trap_group_map.end()) ? git->second.policer_oid : SAI_NULL_OBJECT_ID;
+
+            if (policer_oid != SAI_NULL_OBJECT_ID)
+            {
+                char policer_name[64];
+                snprintf(policer_name, sizeof(policer_name), "copp-policer-0x%lx", (unsigned long)policer_oid);
+
+                uint16_t ethertype = (dhcp_kind == 2) ? 0x86dd : 0x0800;
+                int pret = vpp_sonic_ext_copp_ifout_bind2(ethertype, policer_name, true,
+                        false, dhcp_kind);
+
+                if (pret != 0)
+                {
+                    SWSS_LOG_ERROR("failed to bind DHCP%s policer %s: ret %d",
+                            (dhcp_kind == 2) ? "v6" : "", policer_name, pret);
+                }
+                else
+                {
+                    SWSS_LOG_NOTICE("bound DHCP%s policer %s for trap 0x%lx",
+                            (dhcp_kind == 2) ? "v6" : "", policer_name, (unsigned long)trap_oid);
+                }
+            }
+
+            return;
+        }
     }
 
     if (trap.trap_type == SAI_HOSTIF_TRAP_TYPE_IP2ME)
@@ -270,6 +330,32 @@ void SwitchVpp::uninstallTrapClassifyNow(
         }
 
         return;
+    }
+
+    {
+        uint8_t dhcp_kind = dhcpMatchKind(trap.trap_type);
+
+        if (dhcp_kind != 0)
+        {
+            // Symmetric with the install branch above: unbind by the
+            // dedicated match_dhcp_broadcast flag, not by ethertype --
+            // must NOT fall through to the generic ethertype-based
+            // unbind logic below, since DHCP has no real ethertype
+            // match key of its own (0x0800/0x86dd are shared with
+            // TTL_ERROR/plain IP and would incorrectly be treated as
+            // "still needed"/"not needed" based on unrelated traps).
+            uint16_t ethertype = (dhcp_kind == 2) ? 0x86dd : 0x0800;
+            int pret2 = vpp_sonic_ext_copp_ifout_bind2(ethertype, "", false,
+                    false, dhcp_kind);
+
+            if (pret2 != 0)
+            {
+                SWSS_LOG_ERROR("failed to unbind DHCP%s policer for trap 0x%lx: ret %d",
+                        (dhcp_kind == 2) ? "v6" : "", (unsigned long)trap_oid, pret2);
+            }
+
+            return;
+        }
     }
 
     std::array<uint8_t, 16> match{};

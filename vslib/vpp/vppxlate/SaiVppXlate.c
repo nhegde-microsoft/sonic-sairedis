@@ -3885,6 +3885,24 @@ int vpp_sonic_ext_copp_ifout_bind(
         bool is_bind,
         bool match_ip4_ttl_expiring)
 {
+    return vpp_sonic_ext_copp_ifout_bind2(ethertype, policer_name, is_bind,
+            match_ip4_ttl_expiring, 0);
+}
+
+/*
+ * Same as vpp_sonic_ext_copp_ifout_bind, plus match_dhcp_broadcast
+ * (0=none, 1=DHCP, 2=DHCPv6) for the routed-port DHCP/DHCPv6
+ * client-broadcast trap -- see sonic_ext_copp_ifout_entry_t.
+ * match_dhcp_broadcast in sonic_ext.h for why this needs its own
+ * dedicated match flag rather than relying on ethertype alone.
+ */
+int vpp_sonic_ext_copp_ifout_bind2(
+        uint16_t ethertype,
+        const char *policer_name,
+        bool is_bind,
+        bool match_ip4_ttl_expiring,
+        uint8_t match_dhcp_broadcast)
+{
     vat_main_t *vam = &vat_main;
     vl_api_sonic_ext_copp_ifout_bind_t *mp;
     int ret;
@@ -3901,6 +3919,7 @@ int vpp_sonic_ext_copp_ifout_bind(
     snprintf((char *)mp->policer_name, sizeof(mp->policer_name), "%s", policer_name ? policer_name : "");
     mp->is_bind = is_bind;
     mp->match_ip4_ttl_expiring = match_ip4_ttl_expiring;
+    mp->match_dhcp_broadcast = match_dhcp_broadcast;
 
     S (mp);
     WR (ret);
